@@ -21,7 +21,7 @@ def generate_ppt():
         return jsonify({"status": "ok"}), 200
 
     data = request.json
-    template_file = 'Template PowerPoint.pptx'
+    template_file = 'Source_PowerPoint.pptx'
     
     # Gunakan path absolut agar file template selalu terbaca di server Render
     base_path = os.path.dirname(os.path.abspath(__file__))
