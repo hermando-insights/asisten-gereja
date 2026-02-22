@@ -17,7 +17,6 @@ def add_section(prs, name, slide_id_list):
     
     # Mencari atau membuat extLst di tempat yang benar
     try:
-        # Kita cari extLst yang punya URI khusus untuk Sections
         ext_lst = prs.element.find(qn('p:extLst'))
         if ext_lst is None:
             ext_lst = prs.element.add_extLst()
@@ -27,7 +26,7 @@ def add_section(prs, name, slide_id_list):
     section_id = f"{{{str(uuid.uuid4()).upper()}}}"
     sld_id_xml = "".join([f'<p14:sldId id="{sid}"/>' for sid in slide_id_list])
     
-    # Gunakan XML yang lebih eksplisit untuk p14 namespace
+    # Gunakan XML yang lebih eksplisit untuk p14 namespace agar terbaca PowerPoint
     xml = f'''
     <p:ext xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" 
            uri="{{521415D9-36F0-43E3-9257-96A12269D11F}}">
@@ -63,14 +62,11 @@ def generate_ppt():
     except Exception as e:
         return jsonify({"error": f"File template tidak ditemukan: {e}"}), 500
 
-    # Dictionary untuk menampung slide berdasarkan nama section
-    # Format: {"Nama Section": [slide_id1, slide_id2, ...]}
     sections_map = {}
     current_section = "Default"
 
     for item in data.get('slides', []):
         try:
-            # Jika ada field 'section' baru dari React, kita ganti section aktif
             if item.get('section'):
                 current_section = item['section']
             
@@ -84,7 +80,7 @@ def generate_ppt():
             layout_dipilih = prs.slide_layouts[layout_idx]
             slide = prs.slides.add_slide(layout_dipilih)
             
-            # Simpan slide_id untuk didaftarkan ke section nanti
+            # Daftarkan ID slide ke map section
             sections_map[current_section].append(slide.slide_id)
             
             shapes = sorted(slide.placeholders, key=lambda p: p.placeholder_format.idx)
@@ -100,7 +96,7 @@ def generate_ppt():
             print(f"Gagal proses slide: {e}")
             continue
 
-    # Daftarkan semua section yang terkumpul ke dalam XML PPT
+    # Daftarkan semua section ke XML sebelum disave
     for sec_name, sld_ids in sections_map.items():
         if sld_ids:
             add_section(prs, sec_name, sld_ids)
@@ -117,5 +113,7 @@ def generate_ppt():
     )
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
+    # Render butuh port dinamis agar tidak muncul "No open HTTP ports"
+    port = int(os.environ.get("PORT", 10000))
+    # Host 0.0.0.0 wajib agar server bisa diakses dari luar
     app.run(host='0.0.0.0', port=port)
