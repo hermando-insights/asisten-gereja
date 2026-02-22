@@ -64,7 +64,7 @@ def generate_ppt():
         return jsonify({"status": "ok"}), 200
 
     data = request.json
-    template_file = 'Source_PowerPoint.pptx'
+    template_file = 'Template PowerPoint 2026.pptx'
     
     base_path = os.path.dirname(os.path.abspath(__file__))
     template_path = os.path.join(base_path, template_file)
