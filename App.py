@@ -12,22 +12,28 @@ CORS(app)
 
 # Fungsi bantuan untuk menambahkan Section ke dalam XML PowerPoint
 def add_section(prs, name, slide_id_list):
-    # Mencari elemen extLst di dalam presentasi
+    # Pastikan elemen p14 terdaftar di namespace
+    ns_p14 = "http://schemas.microsoft.com/office/powerpoint/2010/main"
+    
+    # Mencari atau membuat extLst di tempat yang benar
     try:
-        ext_lst = prs.element.xpath('//p:extLst')[0]
-    except IndexError:
+        # Kita cari extLst yang punya URI khusus untuk Sections
+        ext_lst = prs.element.find(qn('p:extLst'))
+        if ext_lst is None:
+            ext_lst = prs.element.add_extLst()
+    except Exception:
         ext_lst = prs.element.add_extLst()
 
-    # Membuat XML untuk Section (Standar Office 2010+)
-    # Setiap section butuh ID unik (GUID)
     section_id = f"{{{str(uuid.uuid4()).upper()}}}"
-    
-    # Membuat daftar slide ID yang masuk dalam section ini
     sld_id_xml = "".join([f'<p14:sldId id="{sid}"/>' for sid in slide_id_list])
     
+    # Gunakan XML yang lebih eksplisit untuk p14 namespace
     xml = f'''
-    <p:ext xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" uri="{{521415D9-36F0-43E3-9257-96A12269D11F}}">
-        <p14:section xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" name="{name}" id="{section_id}">
+    <p:ext xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" 
+           uri="{{521415D9-36F0-43E3-9257-96A12269D11F}}">
+        <p14:section xmlns:p14="{ns_p14}" 
+                     name="{name}" 
+                     id="{section_id}">
             <p14:sldIdLst>
                 {sld_id_xml}
             </p14:sldIdLst>
