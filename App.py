@@ -10,12 +10,15 @@ import uuid
 app = Flask(__name__)
 CORS(app)
 
-# Fungsi bantuan untuk menambahkan Section ke dalam XML PowerPoint
-def add_section(prs, name, slide_id_list):
-    # Pastikan elemen p14 terdaftar di namespace
+# Fungsi baru untuk membungkus semua section dalam satu daftar XML (p14:sectionLst)
+def apply_sections(prs, sections_dict):
+    """
+    Mengintegrasikan fitur Section PowerPoint 2010+ ke dalam file .pptx
+    menggunakan Office 2010/2013+ XML Schema.
+    """
     ns_p14 = "http://schemas.microsoft.com/office/powerpoint/2010/main"
     
-    # Mencari atau membuat extLst di tempat yang benar
+    # Pastikan elemen extLst ada di level presentation root
     try:
         ext_lst = prs.element.find(qn('p:extLst'))
         if ext_lst is None:
@@ -23,28 +26,37 @@ def add_section(prs, name, slide_id_list):
     except Exception:
         ext_lst = prs.element.add_extLst()
 
-    section_id = f"{{{str(uuid.uuid4()).upper()}}}"
-    sld_id_xml = "".join([f'<p14:sldId id="{sid}"/>' for sid in slide_id_list])
-    
-    # Gunakan XML yang lebih eksplisit untuk p14 namespace agar terbaca PowerPoint
-    xml = f'''
+    # Bangun isi XML untuk tiap-tiap section
+    sections_xml = ""
+    for name, sld_ids in sections_dict.items():
+        section_id = f"{{{str(uuid.uuid4()).upper()}}}"
+        # Daftarkan ID slide yang masuk ke dalam section ini
+        sld_id_xml = "".join([f'<p14:sldId id="{sid}"/>' for sid in sld_ids])
+        
+        sections_xml += f'''
+            <p14:section name="{name}" id="{section_id}">
+                <p14:sldIdLst>
+                    {sld_id_xml}
+                </p14:sldIdLst>
+            </p14:section>'''
+
+    # Bungkus semua section ke dalam kontainer p14:sectionLst
+    # URI {521415D9...} adalah standar untuk fitur Section Modern
+    full_xml = f'''
     <p:ext xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" 
            uri="{{521415D9-36F0-43E3-9257-96A12269D11F}}">
-        <p14:section xmlns:p14="{ns_p14}" 
-                     name="{name}" 
-                     id="{section_id}">
-            <p14:sldIdLst>
-                {sld_id_xml}
-            </p14:sldIdLst>
-        </p14:section>
+        <p14:sectionLst xmlns:p14="{ns_p14}">
+            {sections_xml}
+        </p14:sectionLst>
     </p:ext>
     '''
-    ext = parse_xml(xml)
+    
+    ext = parse_xml(full_xml)
     ext_lst.append(ext)
 
 @app.route('/')
 def home():
-    return "<h1>Server Asisten Gereja Aktif!</h1><p>Siap memproses data PowerPoint dengan fitur Section.</p>"
+    return "<h1>Server Asisten Gereja Aktif!</h1><p>Siap memproses data PowerPoint dengan fitur Modern Section (Office 2021 Compatible).</p>"
 
 @app.route('/generate-ppt', methods=['POST', 'OPTIONS'])
 def generate_ppt():
@@ -67,6 +79,7 @@ def generate_ppt():
 
     for item in data.get('slides', []):
         try:
+            # Update nama section jika ditemukan field section baru
             if item.get('section'):
                 current_section = item['section']
             
@@ -80,7 +93,7 @@ def generate_ppt():
             layout_dipilih = prs.slide_layouts[layout_idx]
             slide = prs.slides.add_slide(layout_dipilih)
             
-            # Daftarkan ID slide ke map section
+            # Catat ID slide untuk didaftarkan ke XML Section nanti
             sections_map[current_section].append(slide.slide_id)
             
             shapes = sorted(slide.placeholders, key=lambda p: p.placeholder_format.idx)
@@ -96,10 +109,9 @@ def generate_ppt():
             print(f"Gagal proses slide: {e}")
             continue
 
-    # Daftarkan semua section ke XML sebelum disave
-    for sec_name, sld_ids in sections_map.items():
-        if sld_ids:
-            add_section(prs, sec_name, sld_ids)
+    # Terapkan semua section sekaligus ke file PPTX
+    if sections_map:
+        apply_sections(prs, sections_map)
 
     target_stream = io.BytesIO()
     prs.save(target_stream)
@@ -113,7 +125,5 @@ def generate_ppt():
     )
 
 if __name__ == '__main__':
-    # Render butuh port dinamis agar tidak muncul "No open HTTP ports"
     port = int(os.environ.get("PORT", 10000))
-    # Host 0.0.0.0 wajib agar server bisa diakses dari luar
     app.run(host='0.0.0.0', port=port)
