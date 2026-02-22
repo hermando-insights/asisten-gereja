@@ -1,47 +1,85 @@
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 from pptx import Presentation
+from pptx.oxml.ns import qn
+from pptx.oxml import parse_xml
 import io
 import os
+import uuid
 
 app = Flask(__name__)
-
-# Izinkan semua domain agar GitHub Pages kamu bisa akses tanpa blokir
 CORS(app)
 
-# Rute Utama agar tidak muncul "Not Found" di link Render
+# Fungsi bantuan untuk menambahkan Section ke dalam XML PowerPoint
+def add_section(prs, name, slide_id_list):
+    # Mencari elemen extLst di dalam presentasi
+    try:
+        ext_lst = prs.element.xpath('//p:extLst')[0]
+    except IndexError:
+        ext_lst = prs.element.add_extLst()
+
+    # Membuat XML untuk Section (Standar Office 2010+)
+    # Setiap section butuh ID unik (GUID)
+    section_id = f"{{{str(uuid.uuid4()).upper()}}}"
+    
+    # Membuat daftar slide ID yang masuk dalam section ini
+    sld_id_xml = "".join([f'<p14:sldId id="{sid}"/>' for sid in slide_id_list])
+    
+    xml = f'''
+    <p:ext xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" uri="{{521415D9-36F0-43E3-9257-96A12269D11F}}">
+        <p14:section xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" name="{name}" id="{section_id}">
+            <p14:sldIdLst>
+                {sld_id_xml}
+            </p14:sldIdLst>
+        </p14:section>
+    </p:ext>
+    '''
+    ext = parse_xml(xml)
+    ext_lst.append(ext)
+
 @app.route('/')
 def home():
-    return "<h1>Server Asisten Gereja Aktif!</h1><p>Siap memproses data PowerPoint dari Hermando Insights.</p>"
+    return "<h1>Server Asisten Gereja Aktif!</h1><p>Siap memproses data PowerPoint dengan fitur Section.</p>"
 
 @app.route('/generate-ppt', methods=['POST', 'OPTIONS'])
 def generate_ppt():
-    # Menangani preflight request dari browser
     if request.method == 'OPTIONS':
         return jsonify({"status": "ok"}), 200
 
     data = request.json
     template_file = 'Source_PowerPoint.pptx'
     
-    # Gunakan path absolut agar file template selalu terbaca di server Render
     base_path = os.path.dirname(os.path.abspath(__file__))
     template_path = os.path.join(base_path, template_file)
     
     try:
         prs = Presentation(template_path)
     except Exception as e:
-        print(f"Error Template: {e}")
-        return jsonify({"error": "File template tidak ditemukan di server"}), 500
+        return jsonify({"error": f"File template tidak ditemukan: {e}"}), 500
 
-    # Proses pembuatan slide
+    # Dictionary untuk menampung slide berdasarkan nama section
+    # Format: {"Nama Section": [slide_id1, slide_id2, ...]}
+    sections_map = {}
+    current_section = "Default"
+
     for item in data.get('slides', []):
         try:
+            # Jika ada field 'section' baru dari React, kita ganti section aktif
+            if item.get('section'):
+                current_section = item['section']
+            
+            if current_section not in sections_map:
+                sections_map[current_section] = []
+
             layout_idx = int(item.get('layout_idx', 0))
             if layout_idx >= len(prs.slide_layouts):
                 layout_idx = 0
                 
             layout_dipilih = prs.slide_layouts[layout_idx]
             slide = prs.slides.add_slide(layout_dipilih)
+            
+            # Simpan slide_id untuk didaftarkan ke section nanti
+            sections_map[current_section].append(slide.slide_id)
             
             shapes = sorted(slide.placeholders, key=lambda p: p.placeholder_format.idx)
 
@@ -56,6 +94,11 @@ def generate_ppt():
             print(f"Gagal proses slide: {e}")
             continue
 
+    # Daftarkan semua section yang terkumpul ke dalam XML PPT
+    for sec_name, sld_ids in sections_map.items():
+        if sld_ids:
+            add_section(prs, sec_name, sld_ids)
+
     target_stream = io.BytesIO()
     prs.save(target_stream)
     target_stream.seek(0)
@@ -63,7 +106,7 @@ def generate_ppt():
     return send_file(
         target_stream,
         as_attachment=True,
-        download_name="Ibadah_Minggu.pptx",
+        download_name="Ibadah_Minggu_Sectioned.pptx",
         mimetype='application/vnd.openxmlformats-officedocument.presentationml.presentation'
     )
 
